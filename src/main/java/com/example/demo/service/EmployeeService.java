@@ -1,65 +1,38 @@
 package com.example.demo.service;
 
 import com.example.demo.model.Employee;
+import com.example.demo.repository.EmployeeRepository;
+
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
 @Service
 public class EmployeeService {
 
-    private final List<Employee> employees = new ArrayList<>();
+    private final EmployeeRepository employeeRepository;
 
-    public EmployeeService() {
-
-        employees.add(
-            new Employee(
-                1L,
-                "John",
-                "john@example.com",
-                "IT"
-            )
-        );
-
-        employees.add(
-            new Employee(
-                2L,
-                "Alice",
-                "alice@example.com",
-                "HR"
-            )
-        );
+    public EmployeeService(EmployeeRepository employeeRepository) {
+        this.employeeRepository = employeeRepository;
     }
 
     public List<Employee> getAllEmployees() {
-        return employees;
+        return employeeRepository.findAll();
     }
 
     public Optional<Employee> getEmployeeById(Long id) {
-        return employees.stream()
-                .filter(employee -> employee.getId().equals(id))
-                .findFirst();
+        return employeeRepository.findById(id);
     }
 
     public Employee createEmployee(Employee employee) {
-
-        long newId = employees.stream()
-                .mapToLong(Employee::getId)
-                .max()
-                .orElse(0) + 1;
-
-        employee.setId(newId);
-
-        employees.add(employee);
-
-        return employee;
+        return employeeRepository.save(employee);
     }
 
     public Employee updateEmployee(Long id, Employee updatedEmployee) {
 
-        Optional<Employee> employeeOptional = getEmployeeById(id);
+        Optional<Employee> employeeOptional =
+                employeeRepository.findById(id);
 
         if (employeeOptional.isPresent()) {
 
@@ -69,7 +42,7 @@ public class EmployeeService {
             employee.setEmail(updatedEmployee.getEmail());
             employee.setDepartment(updatedEmployee.getDepartment());
 
-            return employee;
+            return employeeRepository.save(employee);
         }
 
         return null;
@@ -77,8 +50,11 @@ public class EmployeeService {
 
     public boolean deleteEmployee(Long id) {
 
-        return employees.removeIf(
-                employee -> employee.getId().equals(id)
-        );
+        if (employeeRepository.existsById(id)) {
+            employeeRepository.deleteById(id);
+            return true;
+        }
+
+        return false;
     }
 }
