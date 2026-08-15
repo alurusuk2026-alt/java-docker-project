@@ -1,4 +1,21 @@
-target
+# Git
 .git
-.idea
+.gitignore
+
+# Maven build output
+target/
+
+# IDE files
+.idea/
+.vscode/
+*.iml
+
+# Logs
 *.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Documentation
+README.md
