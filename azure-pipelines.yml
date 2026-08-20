@@ -1,0 +1,26 @@
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+
+- task: Maven@4
+  displayName: "Run Unit Tests"
+  inputs:
+    mavenPomFile: "pom.xml"
+    goals: "test"
+    javaHomeOption: "JDKVersion"
+    jdkVersionOption: "1.17"
+    mavenVersionOption: "Default"
+
+- task: Docker@2
+  displayName: "Build Docker Image"
+  inputs:
+    command: "build"
+    repository: "employee-api"
+    Dockerfile: "$(Build.SourcesDirectory)/Dockerfile"
+    buildContext: "$(Build.SourcesDirectory)"
+    tags: |
+      $(Build.BuildId)
