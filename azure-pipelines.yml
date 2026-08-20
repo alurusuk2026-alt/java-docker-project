@@ -4,8 +4,15 @@ trigger:
 pool:
   vmImage: ubuntu-latest
 
+variables:
+  imageRepository: employee-api
+  containerRegistry: sukanyajavadevopsacr2026.azurecr.io
+  dockerfilePath: $(Build.SourcesDirectory)/Dockerfile
+  tag: $(Build.BuildId)
+
 steps:
 
+# Run unit tests
 - task: Maven@4
   displayName: "Run Unit Tests"
   inputs:
@@ -15,12 +22,14 @@ steps:
     jdkVersionOption: "1.17"
     mavenVersionOption: "Default"
 
+# Build and push Docker image to ACR
 - task: Docker@2
-  displayName: "Build Docker Image"
+  displayName: "Build and Push Docker Image to ACR"
   inputs:
-    command: "build"
-    repository: "employee-api"
-    Dockerfile: "$(Build.SourcesDirectory)/Dockerfile"
+    containerRegistry: "ACR-Service-Connection"
+    repository: "$(imageRepository)"
+    command: "buildAndPush"
+    Dockerfile: "$(dockerfilePath)"
     buildContext: "$(Build.SourcesDirectory)"
     tags: |
-      $(Build.BuildId)
+      $(tag)
