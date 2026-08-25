@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+
+metadata:
+  name: employee-api
+
+spec:
+  replicas: 2
+
+  selector:
+    matchLabels:
+      app: employee-api
+
+  template:
+    metadata:
+      labels:
+        app: employee-api
+
+    spec:
+      containers:
+      - name: employee-api
+        image: sukanyajavadevopsacr2026.azurecr.io/employee-api:9
+
+        ports:
+        - containerPort: 8080
+ 
+readinessProbe:
+  httpGet:
+    path: /api/employees
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+
+livenessProbe:
+  httpGet:
+    path: /api/employees
+    port: 8080
+  initialDelaySeconds: 60
+  periodSeconds: 20
