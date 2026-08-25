@@ -2,14 +2,14 @@ apiVersion: v1
 kind: Service
 metadata:
   name: employee-api-service
-spec:
-  selector:
+  labels:
     io.kompose.service: employee-api
-
+spec:
   type: LoadBalancer
-
   ports:
     - name: http
-      protocol: TCP
-      port: 8080
+      port: 80
       targetPort: 8080
+      protocol: TCP
+  selector:
+    io.kompose.service: employee-api
