@@ -47,7 +47,44 @@ steps:
 
 
 # ==========================================================
-# 3. DEPLOY TO AKS
+# 3. DEPLOY MYSQL PVC
+# ==========================================================
+
+- task: KubernetesManifest@1
+  displayName: "Deploy MySQL Persistent Volume Claim"
+  inputs:
+    action: deploy
+    connectionType: azureResourceManager
+    azureSubscriptionConnection: "AZURE-AKS-SERVICE-CONNECTION"
+    azureResourceGroup: "rg-java-devops-project"
+    kubernetesCluster: "aks-java-devops"
+    namespace: default
+
+    manifests: |
+      $(Build.SourcesDirectory)/mysql-data-persistentvolumeclaim.yaml
+
+
+# ==========================================================
+# 4. DEPLOY MYSQL
+# ==========================================================
+
+- task: KubernetesManifest@1
+  displayName: "Deploy MySQL"
+  inputs:
+    action: deploy
+    connectionType: azureResourceManager
+    azureSubscriptionConnection: "AZURE-AKS-SERVICE-CONNECTION"
+    azureResourceGroup: "rg-java-devops-project"
+    kubernetesCluster: "aks-java-devops"
+    namespace: default
+
+    manifests: |
+      $(Build.SourcesDirectory)/mysql-deployment.yaml
+      $(Build.SourcesDirectory)/mysql-service.yaml
+
+
+# ==========================================================
+# 5. DEPLOY EMPLOYEE API
 # ==========================================================
 
 - task: KubernetesManifest@1
