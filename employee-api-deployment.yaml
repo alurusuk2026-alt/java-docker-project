@@ -23,7 +23,7 @@ spec:
     spec:
       containers:
         - name: employee-api
-          image: sukanyajavadevopsacr2026.azurecr.io/employee-api:10
+          image: sukanyajavadevopsacr2026.azurecr.io/employee-api:latest
 
           ports:
             - containerPort: 8080
