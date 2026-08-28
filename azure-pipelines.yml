@@ -223,4 +223,3 @@ steps:
 
     containers: |
       sukanyajavadevopsacr2026.azurecr.io/employee-api:$(Build.BuildId)
-```
