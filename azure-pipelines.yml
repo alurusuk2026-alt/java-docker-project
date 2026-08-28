@@ -100,11 +100,13 @@ steps:
 
 
 # ==========================================================
-# 6. INSERT DATA FROM insert_employee.sql
+# 6.
+# ==========================================================
+# INSERT / DELETE EMPLOYEE DATA
 # ==========================================================
 
 - task: AzureCLI@2
-  displayName: "Execute insert_employee.sql in MySQL"
+  displayName: "Execute Employee Database Operations"
   inputs:
     azureSubscription: "AZURE-AKS-SERVICE-CONNECTION"
     scriptType: "bash"
@@ -134,7 +136,7 @@ steps:
 
 
       echo "=========================================="
-      echo "Getting database credentials"
+      echo "Getting Database Credentials"
       echo "=========================================="
 
       DB_USERNAME=$(kubectl get secret employee-db-secret \
@@ -151,11 +153,11 @@ steps:
 
 
       echo "=========================================="
-      echo "Checking SQL file"
+      echo "Checking SQL File"
       echo "=========================================="
 
-      if [ ! -f "$(Build.SourcesDirectory)/insert_employee.sql" ]; then
-        echo "ERROR: insert_employee.sql not found!"
+      if [ ! -f "$(Build.SourcesDirectory)/employee_data_operations.sql" ]; then
+        echo "ERROR: employee_data_operations.sql not found!"
         exit 1
       fi
 
@@ -163,18 +165,18 @@ steps:
 
 
       echo "=========================================="
-      echo "Copying SQL file to MySQL Pod"
+      echo "Copying SQL File to MySQL Pod"
       echo "=========================================="
 
       kubectl cp \
-        "$(Build.SourcesDirectory)/insert_employee.sql" \
-        "$MYSQL_POD:/tmp/insert_employee.sql"
+        "$(Build.SourcesDirectory)/employee_data_operations.sql" \
+        "$MYSQL_POD:/tmp/employee_data_operations.sql"
 
-      echo "SQL file copied."
+      echo "SQL file copied successfully."
 
 
       echo "=========================================="
-      echo "Executing SQL file"
+      echo "Executing SQL Operations"
       echo "=========================================="
 
       kubectl exec "$MYSQL_POD" -- \
@@ -182,9 +184,9 @@ steps:
         DB_USERNAME="$DB_USERNAME" \
         DB_PASSWORD="$DB_PASSWORD" \
         DB_NAME="$DB_NAME" \
-        sh -c 'mysql -u"$DB_USERNAME" -p"$DB_PASSWORD" "$DB_NAME" < /tmp/insert_employee.sql'
+        sh -c 'mysql -u"$DB_USERNAME" -p"$DB_PASSWORD" "$DB_NAME" < /tmp/employee_data_operations.sql'
 
-      echo "Employee record inserted successfully."
+      echo "Database operations completed successfully."
 
 
       echo "=========================================="
@@ -199,7 +201,7 @@ steps:
         sh -c 'mysql -u"$DB_USERNAME" -p"$DB_PASSWORD" "$DB_NAME" -e "SELECT * FROM employee;"'
 
       echo "=========================================="
-      echo "Employee data verification completed"
+      echo "Verification completed"
       echo "=========================================="
 
 
