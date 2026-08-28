@@ -84,17 +84,132 @@ steps:
 
 
 # ==========================================================
-# 5. DEPLOY EMPLOYEE API
+# 5. WAIT FOR MYSQL
+# ==========================================================
+
+- task: Kubernetes@1
+  displayName: "Wait for MySQL"
+  inputs:
+    connectionType: "Azure Resource Manager"
+    azureSubscriptionEndpoint: "AZURE-AKS-SERVICE-CONNECTION"
+    azureResourceGroup: "rg-java-devops-project"
+    kubernetesCluster: "aks-java-devops"
+    namespace: "default"
+    command: "rollout"
+    arguments: "status deployment/mysql --timeout=180s"
+
+
+# ==========================================================
+# 6. CREATE / UPDATE SQL CONFIGMAP
+# ==========================================================
+
+- task: Kubernetes@1
+  displayName: "Create Employee SQL ConfigMap"
+  inputs:
+    connectionType: "Azure Resource Manager"
+    azureSubscriptionEndpoint: "AZURE-AKS-SERVICE-CONNECTION"
+    azureResourceGroup: "rg-java-devops-project"
+    kubernetesCluster: "aks-java-devops"
+    namespace: "default"
+
+    command: "create"
+
+    arguments: >
+      configmap employee-data-sql
+      --from-file=employee_data.sql=$(Build.SourcesDirectory)/employee_data.sql
+      --dry-run=client
+      -o yaml
+
+    outputFormat: "yaml"
+
+
+# ==========================================================
+# 7. APPLY SQL CONFIGMAP
+# ==========================================================
+
+- task: Bash@3
+  displayName: "Prepare SQL ConfigMap"
+  inputs:
+    targetType: inline
+    script: |
+      kubectl create configmap employee-data-sql \
+        --from-file=employee_data.sql="$(Build.SourcesDirectory)/employee_data.sql" \
+        --dry-run=client \
+        -o yaml > employee-data-configmap.yaml
+
+      echo "ConfigMap generated:"
+      cat employee-data-configmap.yaml
+
+
+- task: Kubernetes@1
+  displayName: "Apply SQL ConfigMap"
+  inputs:
+    connectionType: "Azure Resource Manager"
+    azureSubscriptionEndpoint: "AZURE-AKS-SERVICE-CONNECTION"
+    azureResourceGroup: "rg-java-devops-project"
+    kubernetesCluster: "aks-java-devops"
+    namespace: "default"
+
+    command: "apply"
+
+    arguments: "-f employee-data-configmap.yaml"
+
+
+# ==========================================================
+# 8. DELETE PREVIOUS IMPORT JOB
+# ==========================================================
+
+- task: Kubernetes@1
+  displayName: "Remove Previous Employee Import Job"
+  continueOnError: true
+  inputs:
+    connectionType: "Azure Resource Manager"
+    azureSubscriptionEndpoint: "AZURE-AKS-SERVICE-CONNECTION"
+    azureResourceGroup: "rg-java-devops-project"
+    kubernetesCluster: "aks-java-devops"
+    namespace: "default"
+
+    command: "delete"
+
+    arguments: "job employee-data-import --ignore-not-found=true"
+
+
+# ==========================================================
+# 9. RUN EMPLOYEE SQL IMPORT
+# ==========================================================
+
+- task: KubernetesManifest@1
+  displayName: "Insert Employee Data into MySQL"
+  inputs:
+    action: deploy
+
+    connectionType: azureResourceManager
+    azureSubscriptionConnection: "AZURE-AKS-SERVICE-CONNECTION"
+
+    azureResourceGroup: "rg-java-devops-project"
+    kubernetesCluster: "aks-java-devops"
+
+    namespace: default
+
+    manifests: |
+      $(Build.SourcesDirectory)/employee-data-job.yaml
+
+
+# ==========================================================
+# 10. DEPLOY EMPLOYEE API
 # ==========================================================
 
 - task: KubernetesManifest@1
   displayName: "Deploy Employee API to AKS"
   inputs:
     action: deploy
+
     connectionType: azureResourceManager
     azureSubscriptionConnection: "AZURE-AKS-SERVICE-CONNECTION"
+
     azureResourceGroup: "rg-java-devops-project"
     kubernetesCluster: "aks-java-devops"
+
     namespace: default
 
     manifests: |

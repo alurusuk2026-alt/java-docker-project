@@ -1,76 +1,85 @@
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: batch/v1
+kind: Job
 
 metadata:
-  name: mysql
+  name: employee-data-import
 
 spec:
-  replicas: 1
-
-  selector:
-    matchLabels:
-      io.kompose.service: mysql
-
-  strategy:
-    type: Recreate
+  backoffLimit: 3
 
   template:
     metadata:
       labels:
-        io.kompose.service: mysql
+        app: employee-data-import
 
     spec:
+      restartPolicy: Never
+
       containers:
-        - name: employee-mysql
+        - name: mysql-client
           image: mysql:8.4
 
-          ports:
-            - containerPort: 3306
-              protocol: TCP
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Waiting for MySQL..."
+
+              until mysqladmin ping \
+                -h mysql \
+                -u"$DB_USERNAME" \
+                -p"$DB_PASSWORD" \
+                --silent
+              do
+                echo "MySQL is not ready..."
+                sleep 5
+              done
+
+              echo "MySQL is ready."
+
+              echo "Importing employee_data.sql..."
+
+              mysql \
+                -h mysql \
+                -u"$DB_USERNAME" \
+                -p"$DB_PASSWORD" \
+                "$DB_NAME" < /sql/employee_data.sql
+
+              echo "SQL import completed."
+
+              echo "Verifying employee table..."
+
+              mysql \
+                -h mysql \
+                -u"$DB_USERNAME" \
+                -p"$DB_PASSWORD" \
+                "$DB_NAME" \
+                -e "SELECT * FROM employee;"
 
           env:
-            - name: MYSQL_DATABASE
-              valueFrom:
-                secretKeyRef:
-                  name: employee-db-secret
-                  key: DB_NAME
-
-            - name: MYSQL_USER
+            - name: DB_USERNAME
               valueFrom:
                 secretKeyRef:
                   name: employee-db-secret
                   key: DB_USERNAME
 
-            - name: MYSQL_PASSWORD
+            - name: DB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: employee-db-secret
                   key: DB_PASSWORD
 
-            - name: MYSQL_ROOT_PASSWORD
+            - name: DB_NAME
               valueFrom:
                 secretKeyRef:
                   name: employee-db-secret
-                  key: MYSQL_ROOT_PASSWORD
-
-          livenessProbe:
-            exec:
-              command:
-                - mysqladmin
-                - ping
-                - -h
-                - localhost
-            failureThreshold: 10
-            periodSeconds: 10
-            timeoutSeconds: 5
+                  key: DB_NAME
 
           volumeMounts:
-            - mountPath: /var/lib/mysql
-              name: mysql-data
-
-      restartPolicy: Always
+            - name: sql-file
+              mountPath: /sql
 
       volumes:
-        - name: mysql-data
-          persistentVolumeClaim:
-            claimName: mysql-data
+        - name: sql-file
+          configMap:
+            name: employee-data-sql
