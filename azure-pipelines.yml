@@ -1,3 +1,4 @@
+```yaml
 trigger:
   branches:
     include:
@@ -84,7 +85,127 @@ steps:
 
 
 # ==========================================================
-# 5. DEPLOY EMPLOYEE API
+# 5. WAIT FOR MYSQL
+# ==========================================================
+
+- task: Kubernetes@1
+  displayName: "Wait for MySQL"
+  inputs:
+    connectionType: "Azure Resource Manager"
+    azureSubscriptionEndpoint: "AZURE-AKS-SERVICE-CONNECTION"
+    azureResourceGroup: "rg-java-devops-project"
+    kubernetesCluster: "aks-java-devops"
+    namespace: "default"
+    command: "rollout"
+    arguments: "status deployment/mysql --timeout=180s"
+
+
+# ==========================================================
+# 6. INSERT DATA FROM insert_employee.sql
+# ==========================================================
+
+- task: AzureCLI@2
+  displayName: "Execute insert_employee.sql in MySQL"
+  inputs:
+    azureSubscription: "AZURE-AKS-SERVICE-CONNECTION"
+    scriptType: "bash"
+    scriptLocation: "inlineScript"
+
+    inlineScript: |
+
+      echo "=========================================="
+      echo "Getting AKS credentials"
+      echo "=========================================="
+
+      az aks get-credentials \
+        --resource-group rg-java-devops-project \
+        --name aks-java-devops \
+        --overwrite-existing
+
+
+      echo "=========================================="
+      echo "Getting MySQL Pod"
+      echo "=========================================="
+
+      MYSQL_POD=$(kubectl get pods \
+        -l io.kompose.service=mysql \
+        -o jsonpath='{.items[0].metadata.name}')
+
+      echo "MySQL Pod: $MYSQL_POD"
+
+
+      echo "=========================================="
+      echo "Getting database credentials"
+      echo "=========================================="
+
+      DB_USERNAME=$(kubectl get secret employee-db-secret \
+        -o jsonpath='{.data.DB_USERNAME}' | base64 --decode)
+
+      DB_PASSWORD=$(kubectl get secret employee-db-secret \
+        -o jsonpath='{.data.DB_PASSWORD}' | base64 --decode)
+
+      DB_NAME=$(kubectl get secret employee-db-secret \
+        -o jsonpath='{.data.DB_NAME}' | base64 --decode)
+
+      echo "Database: $DB_NAME"
+      echo "Username: $DB_USERNAME"
+
+
+      echo "=========================================="
+      echo "Checking SQL file"
+      echo "=========================================="
+
+      if [ ! -f "$(Build.SourcesDirectory)/insert_employee.sql" ]; then
+        echo "ERROR: insert_employee.sql not found!"
+        exit 1
+      fi
+
+      echo "SQL file found."
+
+
+      echo "=========================================="
+      echo "Copying SQL file to MySQL Pod"
+      echo "=========================================="
+
+      kubectl cp \
+        "$(Build.SourcesDirectory)/insert_employee.sql" \
+        "$MYSQL_POD:/tmp/insert_employee.sql"
+
+      echo "SQL file copied."
+
+
+      echo "=========================================="
+      echo "Executing SQL file"
+      echo "=========================================="
+
+      kubectl exec "$MYSQL_POD" -- \
+        env \
+        DB_USERNAME="$DB_USERNAME" \
+        DB_PASSWORD="$DB_PASSWORD" \
+        DB_NAME="$DB_NAME" \
+        sh -c 'mysql -u"$DB_USERNAME" -p"$DB_PASSWORD" "$DB_NAME" < /tmp/insert_employee.sql'
+
+      echo "Employee record inserted successfully."
+
+
+      echo "=========================================="
+      echo "Verifying Employee Table"
+      echo "=========================================="
+
+      kubectl exec "$MYSQL_POD" -- \
+        env \
+        DB_USERNAME="$DB_USERNAME" \
+        DB_PASSWORD="$DB_PASSWORD" \
+        DB_NAME="$DB_NAME" \
+        sh -c 'mysql -u"$DB_USERNAME" -p"$DB_PASSWORD" "$DB_NAME" -e "SELECT * FROM employee;"'
+
+      echo "=========================================="
+      echo "Employee data verification completed"
+      echo "=========================================="
+
+
+# ==========================================================
+# 7. DEPLOY EMPLOYEE API
 # ==========================================================
 
 - task: KubernetesManifest@1
@@ -103,3 +224,4 @@ steps:
 
     containers: |
       sukanyajavadevopsacr2026.azurecr.io/employee-api:$(Build.BuildId)
+```
