@@ -13,30 +13,41 @@ pr: none
 variables:
   imageRepository: employee-api
   containerRegistry: sukanyajavadevopsacr2026.azurecr.io
+
   dockerfilePath: $(Build.SourcesDirectory)/Dockerfile
+
+  # Build ID becomes Docker image tag
   tag: $(Build.BuildId)
 
+  # Azure DevOps service connections
   azureServiceConnection: AZURE-AKS-SERVICE-CONNECTION
   acrServiceConnection: ACR-Docker-Service-Connection-1
 
+  # Azure resources
   resourceGroup: rg-java-devops-project
   aksCluster: aks-java-devops
   namespace: default
 
 
 # ==========================================================
-# STAGE 1 - CI
+# STAGES
 # ==========================================================
 
 stages:
 
+
+# ==========================================================
+# STAGE 1 - CI
+# Maven Test -> Docker Build -> Push to ACR
+# ==========================================================
+
 - stage: CI
-  displayName: "CI - Build and Push"
+  displayName: "CI - Build Test and Push"
 
   jobs:
 
   - job: Build
-    displayName: "Build, Test and Push"
+    displayName: "Build Test and Push Docker Image"
 
     pool:
       vmImage: ubuntu-latest
@@ -44,17 +55,19 @@ stages:
     steps:
 
     # ------------------------------------------------------
-    # CHECKOUT
+    # CHECKOUT SOURCE CODE
     # ------------------------------------------------------
 
     - checkout: self
+      displayName: "Checkout Source Code"
+
 
     # ------------------------------------------------------
     # MAVEN UNIT TEST
     # ------------------------------------------------------
 
     - task: Maven@4
-      displayName: "Run Unit Tests"
+      displayName: "Run Maven Unit Tests"
       inputs:
         mavenPomFile: "pom.xml"
         goals: "test"
@@ -64,7 +77,7 @@ stages:
 
 
     # ------------------------------------------------------
-    # BUILD + PUSH DOCKER IMAGE
+    # DOCKER BUILD AND PUSH
     # ------------------------------------------------------
 
     - task: Docker@2
@@ -80,32 +93,33 @@ stages:
 
 
     # ------------------------------------------------------
-    # VERIFY IMAGE TAG
+    # DISPLAY IMAGE INFORMATION
     # ------------------------------------------------------
 
     - bash: |
+
         echo "=========================================="
-        echo "Docker Image"
+        echo "Docker Image Successfully Built"
         echo "=========================================="
 
+        echo "Registry:"
+        echo "$(containerRegistry)"
+
+        echo "Repository:"
+        echo "$(imageRepository)"
+
+        echo "Tag:"
+        echo "$(tag)"
+
+        echo "Full Image:"
         echo "$(containerRegistry)/$(imageRepository):$(tag)"
 
-      displayName: "Display Image Version"
-
-
-    # ------------------------------------------------------
-    # PUBLISH KUBERNETES MANIFESTS
-    # ------------------------------------------------------
-
-    - task: PublishPipelineArtifact@1
-      displayName: "Publish Kubernetes Manifests"
-      inputs:
-        targetPath: "$(Build.SourcesDirectory)"
-        artifact: "k8s-manifests"
+      displayName: "Display Docker Image"
 
 
 # ==========================================================
 # STAGE 2 - DEV
+# Deploy MySQL + Employee API
 # ==========================================================
 
 - stage: Deploy_Dev
@@ -133,7 +147,12 @@ stages:
 
           steps:
 
+          # ------------------------------------------------
+          # CHECKOUT SOURCE CODE
+          # ------------------------------------------------
+
           - checkout: self
+            displayName: "Checkout Source Code"
 
 
           # ------------------------------------------------
@@ -149,9 +168,8 @@ stages:
               azureResourceGroup: "$(resourceGroup)"
               kubernetesCluster: "$(aksCluster)"
               namespace: "$(namespace)"
-
               manifests: |
-                $(Pipeline.Workspace)/s/k8s/mysql-data-persistentvolumeclaim.yaml
+                $(Build.SourcesDirectory)/k8s/mysql-data-persistentvolumeclaim.yaml
 
 
           # ------------------------------------------------
@@ -167,10 +185,9 @@ stages:
               azureResourceGroup: "$(resourceGroup)"
               kubernetesCluster: "$(aksCluster)"
               namespace: "$(namespace)"
-
               manifests: |
-                $(Pipeline.Workspace)/s/k8s/mysql-deployment.yaml
-                $(Pipeline.Workspace)/s/k8s/mysql-service.yaml
+                $(Build.SourcesDirectory)/k8s/mysql-deployment.yaml
+                $(Build.SourcesDirectory)/k8s/mysql-service.yaml
 
 
           # ------------------------------------------------
@@ -202,17 +219,32 @@ stages:
               azureResourceGroup: "$(resourceGroup)"
               kubernetesCluster: "$(aksCluster)"
               namespace: "$(namespace)"
-
               manifests: |
-                    $(Build.SourcesDirectory)/k8s/employee-api-deployment.yaml
-     		    $(Build.SourcesDirectory)/k8s/employee-api-service.yaml
-
+                $(Build.SourcesDirectory)/k8s/employee-api-deployment.yaml
+                $(Build.SourcesDirectory)/k8s/employee-api-service.yaml
               containers: |
                 $(containerRegistry)/$(imageRepository):$(tag)
 
 
+          # ------------------------------------------------
+          # VERIFY EMPLOYEE API
+          # ------------------------------------------------
+
+          - task: Kubernetes@1
+            displayName: "Verify DEV Employee API Rollout"
+            inputs:
+              connectionType: "Azure Resource Manager"
+              azureSubscriptionEndpoint: "$(azureServiceConnection)"
+              azureResourceGroup: "$(resourceGroup)"
+              kubernetesCluster: "$(aksCluster)"
+              namespace: "$(namespace)"
+              command: "rollout"
+              arguments: "status deployment/employee-api --timeout=180s"
+
+
 # ==========================================================
 # STAGE 3 - STAGING
+# Deploy Employee API
 # ==========================================================
 
 - stage: Deploy_Staging
@@ -240,7 +272,12 @@ stages:
 
           steps:
 
+          # ------------------------------------------------
+          # CHECKOUT SOURCE CODE
+          # ------------------------------------------------
+
           - checkout: self
+            displayName: "Checkout Source Code"
 
 
           # ------------------------------------------------
@@ -256,11 +293,9 @@ stages:
               azureResourceGroup: "$(resourceGroup)"
               kubernetesCluster: "$(aksCluster)"
               namespace: "$(namespace)"
-
               manifests: |
                 $(Build.SourcesDirectory)/k8s/employee-api-deployment.yaml
-      		$(Build.SourcesDirectory)/k8s/employee-api-service.yaml
-
+                $(Build.SourcesDirectory)/k8s/employee-api-service.yaml
               containers: |
                 $(containerRegistry)/$(imageRepository):$(tag)
 
@@ -270,7 +305,7 @@ stages:
           # ------------------------------------------------
 
           - task: Kubernetes@1
-            displayName: "Verify Employee API Rollout"
+            displayName: "Verify STAGING Employee API Rollout"
             inputs:
               connectionType: "Azure Resource Manager"
               azureSubscriptionEndpoint: "$(azureServiceConnection)"
@@ -283,6 +318,18 @@ stages:
 
 # ==========================================================
 # STAGE 4 - PRODUCTION
+#
+# Production:
+# 1. Connect to AKS
+# 2. Deploy MySQL PVC
+# 3. Deploy MySQL
+# 4. Wait for MySQL
+# 5. Find MySQL Pod
+# 6. Insert employee SQL
+# 7. Verify employee table
+# 8. Deploy Employee API
+# 9. Verify rollout
+# 10. Verify pods and services
 # ==========================================================
 
 - stage: Deploy_Production
@@ -300,10 +347,13 @@ stages:
     pool:
       vmImage: ubuntu-latest
 
-    # ======================================================
-    # IMPORTANT:
-    # Configure approval on this environment in Azure DevOps
-    # ======================================================
+    # ------------------------------------------------------
+    # IMPORTANT
+    #
+    # Configure approval/checks on this environment:
+    #
+    # employee-production
+    # ------------------------------------------------------
 
     environment: "employee-production"
 
@@ -315,7 +365,12 @@ stages:
 
           steps:
 
+          # ------------------------------------------------
+          # CHECKOUT SOURCE CODE
+          # ------------------------------------------------
+
           - checkout: self
+            displayName: "Checkout Source Code"
 
 
           # =================================================
@@ -333,7 +388,9 @@ stages:
 
                 set -e
 
-                echo "Connecting to AKS..."
+                echo "=========================================="
+                echo "Connecting to AKS"
+                echo "=========================================="
 
                 az aks get-credentials \
                   --resource-group "$(resourceGroup)" \
@@ -341,6 +398,10 @@ stages:
                   --overwrite-existing
 
                 echo "AKS connection successful."
+
+                echo "=========================================="
+                echo "AKS Nodes"
+                echo "=========================================="
 
                 kubectl get nodes
 
@@ -358,9 +419,8 @@ stages:
               azureResourceGroup: "$(resourceGroup)"
               kubernetesCluster: "$(aksCluster)"
               namespace: "$(namespace)"
-
               manifests: |
-                $(Pipeline.Workspace)/s/mysql-data-persistentvolumeclaim.yaml
+                $(Build.SourcesDirectory)/k8s/mysql-data-persistentvolumeclaim.yaml
 
 
           # =================================================
@@ -376,10 +436,9 @@ stages:
               azureResourceGroup: "$(resourceGroup)"
               kubernetesCluster: "$(aksCluster)"
               namespace: "$(namespace)"
-
               manifests: |
-                $(Pipeline.Workspace)/s/mysql-deployment.yaml
-                $(Pipeline.Workspace)/s/mysql-service.yaml
+                $(Build.SourcesDirectory)/k8s/mysql-deployment.yaml
+                $(Build.SourcesDirectory)/k8s/mysql-service.yaml
 
 
           # =================================================
@@ -406,13 +465,21 @@ stages:
 
               set -e
 
-              echo "Getting MySQL pod..."
+              echo "=========================================="
+              echo "Getting MySQL Pod"
+              echo "=========================================="
 
               MYSQL_POD=$(kubectl get pods \
                 -l io.kompose.service=mysql \
                 -o jsonpath='{.items[0].metadata.name}')
 
-              echo "MySQL Pod: $MYSQL_POD"
+              if [ -z "$MYSQL_POD" ]; then
+                echo "ERROR: MySQL pod not found."
+                exit 1
+              fi
+
+              echo "MySQL Pod:"
+              echo "$MYSQL_POD"
 
               echo "##vso[task.setvariable variable=MYSQL_POD]$MYSQL_POD"
 
@@ -420,7 +487,7 @@ stages:
 
 
           # =================================================
-          # 6. INSERT NEW EMPLOYEE DATA
+          # 6. INSERT EMPLOYEE DATA
           # =================================================
 
           - bash: |
@@ -431,26 +498,55 @@ stages:
               echo "Employee Database Change"
               echo "=========================================="
 
+
+              # ------------------------------------------------
+              # GET DATABASE USERNAME
+              # ------------------------------------------------
+
               DB_USERNAME=$(kubectl get secret employee-db-secret \
                 -o jsonpath='{.data.DB_USERNAME}' | base64 --decode)
+
+
+              # ------------------------------------------------
+              # GET DATABASE PASSWORD
+              # ------------------------------------------------
 
               DB_PASSWORD=$(kubectl get secret employee-db-secret \
                 -o jsonpath='{.data.DB_PASSWORD}' | base64 --decode)
 
+
+              # ------------------------------------------------
+              # GET DATABASE NAME
+              # ------------------------------------------------
+
               DB_NAME=$(kubectl get secret employee-db-secret \
                 -o jsonpath='{.data.DB_NAME}' | base64 --decode)
 
-              echo "Database: $DB_NAME"
+
+              echo "Database:"
+              echo "$DB_NAME"
+
+
+              # ------------------------------------------------
+              # CHECK SQL FILE
+              # ------------------------------------------------
 
               echo "Checking SQL file..."
 
               if [ ! -f "$(Build.SourcesDirectory)/insert_employee.sql" ]; then
+
                 echo "ERROR: insert_employee.sql not found."
+
                 exit 1
+
               fi
 
               echo "SQL file found."
 
+
+              # ------------------------------------------------
+              # COPY SQL FILE TO MYSQL POD
+              # ------------------------------------------------
 
               echo "Copying SQL file to MySQL pod..."
 
@@ -458,6 +554,10 @@ stages:
                 "$(Build.SourcesDirectory)/insert_employee.sql" \
                 "$(MYSQL_POD):/tmp/insert_employee.sql"
 
+
+              # ------------------------------------------------
+              # EXECUTE SQL
+              # ------------------------------------------------
 
               echo "Executing SQL..."
 
@@ -470,8 +570,14 @@ stages:
                 'mysql -u"$DB_USERNAME" -p"$DB_PASSWORD" "$DB_NAME" < /tmp/insert_employee.sql'
 
 
-              echo "Database change completed."
+              echo "=========================================="
+              echo "Database Change Completed"
+              echo "=========================================="
 
+
+              # ------------------------------------------------
+              # VERIFY EMPLOYEE TABLE
+              # ------------------------------------------------
 
               echo "Verifying employee table..."
 
@@ -484,6 +590,9 @@ stages:
                 'mysql -u"$DB_USERNAME" -p"$DB_PASSWORD" "$DB_NAME" -e "SELECT * FROM employee;"'
 
 
+            displayName: "Insert Employee Data"
+
+
           # =================================================
           # 7. DEPLOY EMPLOYEE API
           # =================================================
@@ -492,21 +601,14 @@ stages:
             displayName: "Deploy Employee API to PRODUCTION"
             inputs:
               action: deploy
-
               connectionType: azureResourceManager
-
               azureSubscriptionConnection: "$(azureServiceConnection)"
-
               azureResourceGroup: "$(resourceGroup)"
-
               kubernetesCluster: "$(aksCluster)"
-
               namespace: "$(namespace)"
-
               manifests: |
                 $(Build.SourcesDirectory)/k8s/employee-api-deployment.yaml
-      		$(Build.SourcesDirectory)/k8s/employee-api-service.yaml
-
+                $(Build.SourcesDirectory)/k8s/employee-api-service.yaml
               containers: |
                 $(containerRegistry)/$(imageRepository):$(tag)
 
@@ -528,10 +630,12 @@ stages:
 
 
           # =================================================
-          # 9. VERIFY PODS
+          # 9. VERIFY PODS AND SERVICES
           # =================================================
 
           - bash: |
+
+              set -e
 
               echo "=========================================="
               echo "Production Pods"
@@ -539,10 +643,25 @@ stages:
 
               kubectl get pods -o wide
 
+
               echo "=========================================="
               echo "Production Services"
               echo "=========================================="
 
               kubectl get services
+
+
+              echo "=========================================="
+              echo "Employee API Deployment"
+              echo "=========================================="
+
+              kubectl get deployment employee-api
+
+
+              echo "=========================================="
+              echo "MySQL Deployment"
+              echo "=========================================="
+
+              kubectl get deployment mysql
 
             displayName: "Verify Production AKS"
