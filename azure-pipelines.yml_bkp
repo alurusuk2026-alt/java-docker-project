@@ -1,0 +1,227 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pr: none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  imageRepository: employee-api
+  containerRegistry: sukanyajavadevopsacr2026.azurecr.io
+  dockerfilePath: $(Build.SourcesDirectory)/Dockerfile
+  tag: $(Build.BuildId)
+
+steps:
+
+# ==========================================================
+# 1. RUN UNIT TESTS
+# ==========================================================
+
+- task: Maven@4
+  displayName: "Run Unit Tests"
+  inputs:
+    mavenPomFile: "pom.xml"
+    goals: "test"
+    javaHomeOption: "JDKVersion"
+    jdkVersionOption: "1.17"
+    mavenVersionOption: "Default"
+
+
+# ==========================================================
+# 2. BUILD + PUSH DOCKER IMAGE TO ACR
+# ==========================================================
+
+- task: Docker@2
+  displayName: "Build and Push Docker Image to ACR"
+  inputs:
+    containerRegistry: "ACR-Docker-Service-Connection-1"
+    repository: "$(imageRepository)"
+    command: "buildAndPush"
+    Dockerfile: "$(dockerfilePath)"
+    buildContext: "$(Build.SourcesDirectory)"
+    tags: |
+      $(tag)
+
+
+# ==========================================================
+# 3. DEPLOY MYSQL PVC
+# ==========================================================
+
+- task: KubernetesManifest@1
+  displayName: "Deploy MySQL Persistent Volume Claim"
+  inputs:
+    action: deploy
+    connectionType: azureResourceManager
+    azureSubscriptionConnection: "AZURE-AKS-SERVICE-CONNECTION"
+    azureResourceGroup: "rg-java-devops-project"
+    kubernetesCluster: "aks-java-devops"
+    namespace: default
+
+    manifests: |
+      $(Build.SourcesDirectory)/mysql-data-persistentvolumeclaim.yaml
+
+
+# ==========================================================
+# 4. DEPLOY MYSQL
+# ==========================================================
+
+- task: KubernetesManifest@1
+  displayName: "Deploy MySQL"
+  inputs:
+    action: deploy
+    connectionType: azureResourceManager
+    azureSubscriptionConnection: "AZURE-AKS-SERVICE-CONNECTION"
+    azureResourceGroup: "rg-java-devops-project"
+    kubernetesCluster: "aks-java-devops"
+    namespace: default
+
+    manifests: |
+      $(Build.SourcesDirectory)/mysql-deployment.yaml
+      $(Build.SourcesDirectory)/mysql-service.yaml
+
+
+# ==========================================================
+# 5. WAIT FOR MYSQL
+# ==========================================================
+
+- task: Kubernetes@1
+  displayName: "Wait for MySQL"
+  inputs:
+    connectionType: "Azure Resource Manager"
+    azureSubscriptionEndpoint: "AZURE-AKS-SERVICE-CONNECTION"
+    azureResourceGroup: "rg-java-devops-project"
+    kubernetesCluster: "aks-java-devops"
+    namespace: "default"
+    command: "rollout"
+    arguments: "status deployment/mysql --timeout=180s"
+
+
+# ==========================================================
+# 6.
+# ==========================================================
+# INSERT / DELETE EMPLOYEE DATA
+# ==========================================================
+
+- task: AzureCLI@2
+  displayName: "Execute Employee Database Operations"
+  inputs:
+    azureSubscription: "AZURE-AKS-SERVICE-CONNECTION"
+    scriptType: "bash"
+    scriptLocation: "inlineScript"
+
+    inlineScript: |
+
+      echo "=========================================="
+      echo "Getting AKS credentials"
+      echo "=========================================="
+
+      az aks get-credentials \
+        --resource-group rg-java-devops-project \
+        --name aks-java-devops \
+        --overwrite-existing
+
+
+      echo "=========================================="
+      echo "Getting MySQL Pod"
+      echo "=========================================="
+
+      MYSQL_POD=$(kubectl get pods \
+        -l io.kompose.service=mysql \
+        -o jsonpath='{.items[0].metadata.name}')
+
+      echo "MySQL Pod: $MYSQL_POD"
+
+
+      echo "=========================================="
+      echo "Getting Database Credentials"
+      echo "=========================================="
+
+      DB_USERNAME=$(kubectl get secret employee-db-secret \
+        -o jsonpath='{.data.DB_USERNAME}' | base64 --decode)
+
+      DB_PASSWORD=$(kubectl get secret employee-db-secret \
+        -o jsonpath='{.data.DB_PASSWORD}' | base64 --decode)
+
+      DB_NAME=$(kubectl get secret employee-db-secret \
+        -o jsonpath='{.data.DB_NAME}' | base64 --decode)
+
+      echo "Database: $DB_NAME"
+      echo "Username: $DB_USERNAME"
+
+
+      echo "=========================================="
+      echo "Checking SQL File"
+      echo "=========================================="
+
+      if [ ! -f "$(Build.SourcesDirectory)/employee_data_operations.sql" ]; then
+        echo "ERROR: employee_data_operations.sql not found!"
+        exit 1
+      fi
+
+      echo "SQL file found."
+
+
+      echo "=========================================="
+      echo "Copying SQL File to MySQL Pod"
+      echo "=========================================="
+
+      kubectl cp \
+        "$(Build.SourcesDirectory)/employee_data_operations.sql" \
+        "$MYSQL_POD:/tmp/employee_data_operations.sql"
+
+      echo "SQL file copied successfully."
+
+
+      echo "=========================================="
+      echo "Executing SQL Operations"
+      echo "=========================================="
+
+      kubectl exec "$MYSQL_POD" -- \
+        env \
+        DB_USERNAME="$DB_USERNAME" \
+        DB_PASSWORD="$DB_PASSWORD" \
+        DB_NAME="$DB_NAME" \
+        sh -c 'mysql -u"$DB_USERNAME" -p"$DB_PASSWORD" "$DB_NAME" < /tmp/employee_data_operations.sql'
+
+      echo "Database operations completed successfully."
+
+
+      echo "=========================================="
+      echo "Verifying Employee Table"
+      echo "=========================================="
+
+      kubectl exec "$MYSQL_POD" -- \
+        env \
+        DB_USERNAME="$DB_USERNAME" \
+        DB_PASSWORD="$DB_PASSWORD" \
+        DB_NAME="$DB_NAME" \
+        sh -c 'mysql -u"$DB_USERNAME" -p"$DB_PASSWORD" "$DB_NAME" -e "SELECT * FROM employee;"'
+
+      echo "=========================================="
+      echo "Verification completed"
+      echo "=========================================="
+
+
+# ==========================================================
+# 7. DEPLOY EMPLOYEE API
+# ==========================================================
+
+- task: KubernetesManifest@1
+  displayName: "Deploy Employee API to AKS"
+  inputs:
+    action: deploy
+    connectionType: azureResourceManager
+    azureSubscriptionConnection: "AZURE-AKS-SERVICE-CONNECTION"
+    azureResourceGroup: "rg-java-devops-project"
+    kubernetesCluster: "aks-java-devops"
+    namespace: default
+
+    manifests: |
+      $(Build.SourcesDirectory)/employee-api-deployment.yaml
+      $(Build.SourcesDirectory)/employee-api-service.yaml
+
+    containers: |
+      sukanyajavadevopsacr2026.azurecr.io/employee-api:$(Build.BuildId)
