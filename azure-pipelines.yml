@@ -204,8 +204,8 @@ stages:
               namespace: "$(namespace)"
 
               manifests: |
-                $(Pipeline.Workspace)/s/employee-api-deployment.yaml
-                $(Pipeline.Workspace)/s/employee-api-service.yaml
+                    $(Build.SourcesDirectory)/k8s/employee-api-deployment.yaml
+     		    $(Build.SourcesDirectory)/k8s/employee-api-service.yaml
 
               containers: |
                 $(containerRegistry)/$(imageRepository):$(tag)
@@ -258,8 +258,8 @@ stages:
               namespace: "$(namespace)"
 
               manifests: |
-                $(Pipeline.Workspace)/s/employee-api-deployment.yaml
-                $(Pipeline.Workspace)/s/employee-api-service.yaml
+                $(Build.SourcesDirectory)/k8s/employee-api-deployment.yaml
+      		$(Build.SourcesDirectory)/k8s/employee-api-service.yaml
 
               containers: |
                 $(containerRegistry)/$(imageRepository):$(tag)
@@ -504,8 +504,8 @@ stages:
               namespace: "$(namespace)"
 
               manifests: |
-                $(Pipeline.Workspace)/s/employee-api-deployment.yaml
-                $(Pipeline.Workspace)/s/employee-api-service.yaml
+                $(Build.SourcesDirectory)/k8s/employee-api-deployment.yaml
+      		$(Build.SourcesDirectory)/k8s/employee-api-service.yaml
 
               containers: |
                 $(containerRegistry)/$(imageRepository):$(tag)
